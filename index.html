@@ -74,7 +74,7 @@
             background: #ff9800;
             border-color: #fff;
         }
-        #start-screen, #pause-screen {
+        #start-screen, #pause-screen, #wave-prompt-screen {
             position: absolute;
             top: 0;
             left: 0;
@@ -87,11 +87,11 @@
             justify-content: center;
             z-index: 20;
         }
-        #pause-screen {
+        #pause-screen, #wave-prompt-screen {
             display: none;
             z-index: 25;
         }
-        #start-screen h1, #pause-screen h1 {
+        #start-screen h1, #pause-screen h1, #wave-prompt-screen h1 {
             font-size: 40px;
             margin-bottom: 10px;
             color: #ffeb3b;
@@ -106,12 +106,13 @@
             margin-bottom: 15px;
             font-weight: bold;
         }
-        .mode-container, .map-container {
+        .mode-container, .map-container, .wave-container {
             display: flex;
             gap: 15px;
-            margin-bottom: 20px;
+            margin-bottom: 15px;
             flex-wrap: wrap;
             justify-content: center;
+            align-items: center;
         }
         .mode-btn, .map-btn {
             background: #333;
@@ -130,6 +131,17 @@
             border-color: #fff;
             box-shadow: 0 0 12px rgba(233, 30, 99, 0.6);
         }
+        .wave-input-box {
+            padding: 8px 12px;
+            font-size: 16px;
+            border-radius: 8px;
+            border: 2px solid #555;
+            background: #222;
+            color: #fff;
+            width: 80px;
+            text-align: center;
+            font-weight: bold;
+        }
         .play-btn {
             padding: 15px 40px;
             font-size: 22px;
@@ -146,6 +158,22 @@
             transform: translateY(4px);
             box-shadow: 0 2px 0 #2E7D32;
         }
+        .prompt-btn-group {
+            display: flex;
+            gap: 20px;
+            margin-top: 20px;
+        }
+        .prompt-btn {
+            padding: 12px 30px;
+            font-size: 18px;
+            font-weight: bold;
+            border-radius: 12px;
+            cursor: pointer;
+            border: none;
+        }
+        #btn-tamam { background: #2196F3; color: white; }
+        #btn-devam { background: #4CAF50; color: white; }
+
         canvas {
             display: block;
             background-color: #1b361c;
@@ -229,6 +257,7 @@
         <span>Skor: <span id="score" style="color:#ffeb3b;">0</span></span>
         <span>En Yüksek: <span id="highScore" style="color:#ff9800;">0</span></span>
         <span>Altın: 🪙<span id="gold" style="color:#ffd700;">0</span></span>
+        <span id="wave-stat" style="display:none; color:#00e676;">Dalga: <span id="current-wave-display">1</span>/<span id="total-wave-display">1</span></span>
     </div>
     <div style="border-left: 2px solid #555; height: 25px;"></div>
     <button class="weapon-btn active" id="btn-single" onclick="selectWeapon('single')">Tekli</button>
@@ -255,13 +284,29 @@
     <div class="mode-container">
         <button class="mode-btn selected" id="mode-normal" onclick="setGameMode('normal')">Normal Mod</button>
         <button class="mode-btn" id="mode-hard" onclick="setGameMode('hard')">🔥 Zor Mod (Sadece Boss)</button>
+        <button class="mode-btn" id="mode-wave" onclick="setGameMode('wave')">🌊 Dalga Modu</button>
     </div>
+
+    <div class="wave-container" id="wave-settings-box" style="display:none;">
+        <span style="font-weight:bold; font-size:16px; color:#ffeb3b;">Toplam Dalga Sayısı:</span>
+        <input type="number" id="wave-input" class="wave-input-box" value="3" min="1" max="20">
+    </div>
+
     <button class="play-btn" id="start-btn" onclick="startGame()">OYUNU BAŞLAT</button>
 </div>
 
 <div id="pause-screen">
     <h1>OYUN DURAKLATILDI</h1>
     <button class="play-btn" onclick="togglePause()">DEVAM ET</button>
+</div>
+
+<div id="wave-prompt-screen">
+    <h1 id="prompt-title">DALGA TAMAMLANDI!</h1>
+    <div class="score-info" id="prompt-msg" style="font-size: 20px; color: #ffeb3b;">Tamam mı ? Devam mı ?</div>
+    <div class="prompt-btn-group">
+        <button class="prompt-btn" id="btn-tamam" onclick="onWavePromptChoice('tamam')">Tamam</button>
+        <button class="prompt-btn" id="btn-devam" onclick="onWavePromptChoice('devam')">Devam</button>
+    </div>
 </div>
 
 <canvas id="gameCanvas"></canvas>
@@ -285,6 +330,7 @@ const goldEl = document.getElementById("gold");
 
 const startScreen = document.getElementById("start-screen");
 const pauseScreen = document.getElementById("pause-screen");
+const wavePromptScreen = document.getElementById("wave-prompt-screen");
 const screenTitle = document.getElementById("screen-title");
 const screenScore = document.getElementById("screen-score");
 const startHighScoreEl = document.getElementById("start-high-score");
@@ -325,10 +371,22 @@ loadSavedData();
 let currentGameMode = 'normal';
 let currentMap = 'park';
 
+let totalWaves = 3;
+let currentWave = 1;
+let enemiesToSpawnInWave = 0;
+let enemiesSpawnedCount = 0;
+let pendingWaveGold = 0;
+
 function setGameMode(mode) {
     currentGameMode = mode;
     document.getElementById('mode-normal').classList.toggle('selected', mode === 'normal');
     document.getElementById('mode-hard').classList.toggle('selected', mode === 'hard');
+    document.getElementById('mode-wave').classList.toggle('selected', mode === 'wave');
+
+    const waveBox = document.getElementById('wave-settings-box');
+    if (waveBox) {
+        waveBox.style.display = (mode === 'wave') ? 'flex' : 'none';
+    }
 }
 
 function setGameMap(map) {
@@ -343,7 +401,7 @@ let isPaused = false;
 let isMuted = false;
 
 function togglePause() {
-    if (!isGameStarted || isGameOver) return;
+    if (!isGameStarted || isGameOver || wavePromptScreen.style.display === "flex") return;
     isPaused = !isPaused;
     pauseScreen.style.display = isPaused ? "flex" : "none";
     const pauseBtn = document.getElementById('btn-pause');
@@ -578,6 +636,7 @@ function startGame() {
     initAudio();
     isPaused = false;
     pauseScreen.style.display = "none";
+    wavePromptScreen.style.display = "none";
     const pauseBtn = document.getElementById('btn-pause');
     if (pauseBtn) {
         pauseBtn.textContent = "Durdur";
@@ -585,6 +644,20 @@ function startGame() {
     }
     startScreen.style.display = "none";
     isGameStarted = true;
+
+    if (currentGameMode === 'wave') {
+        totalWaves = parseInt(document.getElementById('wave-input').value) || 3;
+        currentWave = 1;
+        pendingWaveGold = 0;
+        document.getElementById('wave-stat').style.display = 'flex';
+        document.getElementById('total-wave-display').textContent = totalWaves;
+        document.getElementById('current-wave-display').textContent = currentWave;
+        enemiesToSpawnInWave = 8 + (currentWave * 4);
+        enemiesSpawnedCount = 0;
+    } else {
+        document.getElementById('wave-stat').style.display = 'none';
+    }
+
     resetGame();
 }
 
@@ -658,7 +731,7 @@ if (fireBtn) {
 }
 
 function handleShooting() {
-    if (!isGameStarted || isGameOver || isPaused) return;
+    if (!isGameStarted || isGameOver || isPaused || wavePromptScreen.style.display === "flex") return;
 
     if (currentWeapon === 'grenade') {
         throwGrenade();
@@ -819,10 +892,15 @@ window.addEventListener("mousemove", e => { if (grenadeJoystickActive && grenade
 window.addEventListener("mouseup", () => { if (grenadeJoystickActive && grenadeTouchId === null) resetGrenadeJoystick(); });
 
 function spawnEnemy() {
-    if (!isGameStarted || isGameOver || isPaused || enemies.length >= 7) return;
+    if (!isGameStarted || isGameOver || isPaused || wavePromptScreen.style.display === "flex" || enemies.length >= 7) return;
+
+    if (currentGameMode === 'wave') {
+        if (enemiesSpawnedCount >= enemiesToSpawnInWave) return;
+        enemiesSpawnedCount++;
+    }
 
     totalSpawnedEnemies++;
-    const isBoss = (currentGameMode === 'hard') ? true : (totalSpawnedEnemies % 20 === 0);
+    const isBoss = (currentGameMode === 'hard') ? true : (currentGameMode === 'wave' ? (enemiesSpawnedCount % 5 === 0) : (totalSpawnedEnemies % 20 === 0));
     const radius = isBoss ? 54 : 18;
     let x, y;
     if (Math.random() < 0.5) {
@@ -967,7 +1045,7 @@ function drawHuman3D(x, y, radius, color, angle, walkCycle = 0, isBoss = false, 
 }
 
 function update() {
-    if (!isGameStarted || isGameOver || isPaused) return;
+    if (!isGameStarted || isGameOver || isPaused || wavePromptScreen.style.display === "flex") return;
 
     if (unlockedWeapons.grenade) {
         const grenadeBtn = document.getElementById('btn-grenade');
@@ -989,14 +1067,12 @@ function update() {
 
     const now = Date.now();
 
-    // Hareket eden arabaları güncelle (Şehir İçi Haritası - Oyuncu, Düşman ve Boss'a Hasar Verir)
     movingCars.forEach(car => {
         car.x += car.vx;
         if (car.x < 0 || car.x + car.w > canvas.width) {
             car.vx *= -1;
         }
 
-        // Oyuncu ile araba çarpışması (-45 Can)
         if (player.x > car.x && player.x < car.x + car.w && player.y > car.y && player.y < car.y + car.h) {
             player.hp -= 45;
             healthEl.textContent = Math.max(0, player.hp);
@@ -1005,7 +1081,6 @@ function update() {
             car.x += car.vx * 15; 
         }
 
-        // Düşmanlar ve Boss'lar ile araba çarpışması (-45 Hasar, spamlanmaması için süre kontrolü eklendi)
         enemies.forEach(en => {
             if (en.x > car.x && en.x < car.x + car.w && en.y > car.y && en.y < car.y + car.h) {
                 if (!en.carHitTime || now - en.carHitTime > 600) {
@@ -1016,7 +1091,6 @@ function update() {
         });
     });
 
-    // Lağım pisliği kontrolü (Kanalizasyon Haritası - Oyuncu, Düşman ve Boss'lar Lağımdan Hasar Alır)
     if (currentMap === 'kanal') {
         let playerInSewage = false;
         sewagePools.forEach(pool => {
@@ -1058,22 +1132,39 @@ function update() {
         if (enemies[i].hp <= 0) {
             const en = enemies[i];
             if (en.isBoss) {
-                for (let k = 0; k < 10; k++) {
-                    const angle = (Math.PI * 2 / 10) * k;
-                    const dist = 25 + Math.random() * 20;
-                    coins.push({ x: en.x + Math.cos(angle) * dist, y: en.y + Math.sin(angle) * dist, radius: 8 });
-                }
                 healthPacks.push({ x: en.x + 15, y: en.y, radius: 12, healValue: 40 });
                 player.score += 50;
             } else {
-                coins.push({ x: en.x, y: en.y, radius: 8 });
                 if (Math.random() < 0.4) {
                     healthPacks.push({ x: en.x, y: en.y, radius: 12, healValue: 25 });
                 }
                 player.score += 10;
             }
+
+            if (currentGameMode !== 'wave') {
+                coins.push({ x: en.x, y: en.y, radius: 8 });
+            }
+
             enemies.splice(i, 1);
             scoreEl.textContent = player.score;
+        }
+    }
+
+    if (currentGameMode === 'wave' && enemiesSpawnedCount >= enemiesToSpawnInWave && enemies.length === 0) {
+        pendingWaveGold += 60;
+        if (currentWave >= totalWaves) {
+            gold += pendingWaveGold;
+            goldEl.textContent = gold;
+            localStorage.setItem("cephedeGold", gold);
+            isGameOver = true;
+            screenTitle.textContent = "TEBRİKLER! DALGALARI BİTİRDİN!";
+            screenScore.innerHTML = "Toplam Kazanılan Altın: +" + pendingWaveGold + " 🪙 | Skorun: " + player.score;
+            startBtn.textContent = "ANA MENÜ";
+            startScreen.style.display = "flex";
+            return;
+        } else {
+            wavePromptScreen.style.display = "flex";
+            return;
         }
     }
 
@@ -1087,6 +1178,14 @@ function update() {
         player.hp = 0;
         healthEl.textContent = 0;
         playGameOverSound();
+
+        if (currentGameMode === 'wave') {
+            // Kazanacağı ödül altın sıfırlanır ve mevcut altınından da 60 altın düşülür (en az 0 kalacak şekilde)
+            pendingWaveGold = 0;
+            gold = Math.max(0, gold - 60);
+            goldEl.textContent = gold;
+            localStorage.setItem("cephedeGold", gold);
+        }
 
         if (player.score > highScore) {
             highScore = player.score;
@@ -1214,6 +1313,24 @@ function update() {
     });
 }
 
+function onWavePromptChoice(choice) {
+    wavePromptScreen.style.display = "none";
+    if (choice === 'tamam') {
+        gold += pendingWaveGold;
+        goldEl.textContent = gold;
+        localStorage.setItem("cephedeGold", gold);
+        startScreen.style.display = "flex";
+        isGameStarted = false;
+    } else if (choice === 'devam') {
+        currentWave++;
+        document.getElementById('current-wave-display').textContent = currentWave;
+        enemiesToSpawnInWave = 8 + (currentWave * 4);
+        enemiesSpawnedCount = 0;
+        bullets = [];
+        enemies = [];
+    }
+}
+
 function draw() {
     ctx.save();
     if (screenShakeTimer > 0) {
@@ -1224,9 +1341,7 @@ function draw() {
 
     if (!isGameStarted) { ctx.restore(); return; }
 
-    // Harita arka planları ve zemin düzenlemeleri
     if (currentMap === 'kanal') {
-        // Kanalizasyon: Gri kareli zemin (fayans/beton görünümü)
         ctx.fillStyle = "#333333";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -1252,7 +1367,6 @@ function draw() {
         for (let y = 0; y < canvas.height; y += 60) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke(); }
     }
 
-    // Elips Lağım Havuzları (Kanalizasyon Haritası)
     sewagePools.forEach(pool => {
         ctx.beginPath();
         ctx.ellipse(pool.cx, pool.cy, pool.rx, pool.ry, 0, 0, Math.PI * 2);
@@ -1267,7 +1381,6 @@ function draw() {
         ctx.fillText("Lağım Pisliği", pool.cx - 35, pool.cy - pool.ry - 5);
     });
 
-    // Hareket Eden Arabalar (Şehir İçi Haritası)
     movingCars.forEach(car => {
         ctx.fillStyle = "#000";
         ctx.fillRect(car.x - 2, car.y - 2, car.w + 4, car.h + 4);
