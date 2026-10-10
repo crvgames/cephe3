@@ -1132,6 +1132,14 @@ function update() {
         if (enemies[i].hp <= 0) {
             const en = enemies[i];
             if (en.isBoss) {
+                // Sadece Dalga Modu açık değilse boss altın saçar
+                if (currentGameMode !== 'wave') {
+                    for (let k = 0; k < 10; k++) {
+                        const angle = (Math.PI * 2 / 10) * k;
+                        const dist = 25 + Math.random() * 20;
+                        coins.push({ x: en.x + Math.cos(angle) * dist, y: en.y + Math.sin(angle) * dist, radius: 8 });
+                    }
+                }
                 healthPacks.push({ x: en.x + 15, y: en.y, radius: 12, healValue: 40 });
                 player.score += 50;
             } else {
@@ -1141,7 +1149,7 @@ function update() {
                 player.score += 10;
             }
 
-            if (currentGameMode !== 'wave') {
+            if (currentGameMode !== 'wave' && !en.isBoss) {
                 coins.push({ x: en.x, y: en.y, radius: 8 });
             }
 
@@ -1180,7 +1188,6 @@ function update() {
         playGameOverSound();
 
         if (currentGameMode === 'wave') {
-            // Kazanacağı ödül altın sıfırlanır ve mevcut altınından da 60 altın düşülür (en az 0 kalacak şekilde)
             pendingWaveGold = 0;
             gold = Math.max(0, gold - 60);
             goldEl.textContent = gold;
